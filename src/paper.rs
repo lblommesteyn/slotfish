@@ -48,6 +48,7 @@ pub struct PaperConfig {
     pub warm: Option<PathBuf>,
     pub duration_secs: f64,
     pub slot_secs: f64,
+    pub commitment: String,
 }
 
 struct Pending {
@@ -69,7 +70,8 @@ fn now_s() -> f64 {
 pub fn run(cfg: &PaperConfig) -> Result<()> {
     std::fs::create_dir_all(cfg.out_dir.join("events"))?;
     let scorer = Scorer::load(&cfg.model)?;
-    let rpc = Rpc::new(&cfg.url)?;
+    let mut rpc = Rpc::new(&cfg.url)?;
+    rpc.commitment = cfg.commitment.clone();
     let hold = (cfg.hold_secs / cfg.slot_secs).round() as u64;
     let skill_h = (120.0 / cfg.slot_secs).round() as u64;
 
@@ -85,7 +87,7 @@ pub fn run(cfg: &PaperConfig) -> Result<()> {
     let warm_events = tape.len();
     eprintln!("warm start: {warm_events} events");
 
-    let tip = rpc.call("getSlot", json!([{"commitment": "finalized"}]))?["result"]
+    let tip = rpc.call("getSlot", json!([{"commitment": rpc.commitment}]))?["result"]
         .as_u64()
         .context("getSlot")?;
     let live_start = tip;
@@ -108,7 +110,7 @@ pub fn run(cfg: &PaperConfig) -> Result<()> {
     assumed.p_fail = 0.0;
 
     while now_s() - t_start < cfg.duration_secs {
-        let tip = rpc.call("getSlot", json!([{"commitment": "finalized"}]))?["result"]
+        let tip = rpc.call("getSlot", json!([{"commitment": rpc.commitment}]))?["result"]
             .as_u64()
             .context("getSlot")?;
         if tip < next {

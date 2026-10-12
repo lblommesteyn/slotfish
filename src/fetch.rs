@@ -35,6 +35,8 @@ pub enum SlotResult {
 
 pub struct Rpc {
     url: String,
+    /// "finalized" for history (no forks); "confirmed" for the live path.
+    pub commitment: String,
     client: reqwest::blocking::Client,
 }
 
@@ -46,6 +48,7 @@ impl Rpc {
             .build()?;
         Ok(Rpc {
             url: url.to_string(),
+            commitment: "finalized".into(),
             client,
         })
     }
@@ -65,7 +68,7 @@ impl Rpc {
         loop {
             let params = json!([slot, {
                 "maxSupportedTransactionVersion": 1, "encoding": "json",
-                "transactionDetails": "full", "rewards": false, "commitment": "finalized"}]);
+                "transactionDetails": "full", "rewards": false, "commitment": self.commitment}]);
             match self.call("getBlock", params) {
                 Ok(mut j) => {
                     if let Some(err) = j.get("error") {

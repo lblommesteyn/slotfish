@@ -220,6 +220,9 @@ enum Cmd {
         duration_secs: f64,
         #[arg(long, default_value_t = 0.217)]
         slot_secs: f64,
+        /// Block commitment for the live tail: confirmed (what a bot would use) or finalized.
+        #[arg(long, default_value = "confirmed")]
+        commitment: String,
     },
     /// Measure replay throughput, per-event latency and memory.
     Bench {
@@ -475,6 +478,7 @@ fn main() -> Result<()> {
             warm,
             duration_secs,
             slot_secs,
+            commitment,
         } => slotfish::paper::run(&slotfish::paper::PaperConfig {
             url,
             model,
@@ -487,6 +491,7 @@ fn main() -> Result<()> {
             warm,
             duration_secs,
             slot_secs,
+            commitment,
         }),
         Cmd::Bench { events, repeats } => {
             let t0 = Instant::now();
