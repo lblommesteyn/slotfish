@@ -1,0 +1,24 @@
+{
+  "cohort": 6027,
+  "cohort_graduated": 201,
+  "cohort_zero_fee_tainted": 0,
+  "events": 6362909,
+  "first_slot": 455530000,
+  "first_time": 1791695262,
+  "kinds": {
+    "amm_buy": 2090885,
+    "amm_sell": 1506131,
+    "complete": 329,
+    "create": 10621,
+    "failed": 1807408,
+    "migrate": 329,
+    "trade": 947206
+  },
+  "last_slot": 455659999,
+  "last_time": 1791723606,
+  "launched_in_window": 10621,
+  "mayhem_launches": 3013,
+  "mints": 26243,
+  "slot_secs": 0.21803244640343386,
+  "wallets": 243606
+}

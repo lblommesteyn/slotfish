@@ -117,7 +117,7 @@ pub fn run(cfg: &PaperConfig) -> Result<()> {
             std::thread::sleep(Duration::from_millis(400));
             continue;
         }
-        let hi = (tip + 1).min(next + 64);
+        let hi = (tip + 1).min(next + 24);
         let (events, _) = fetch_range(&rpc, next, hi, cfg.workers);
         let arrived = now_s();
         let first_new = tape.len();

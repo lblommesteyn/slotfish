@@ -105,6 +105,8 @@ def main() -> None:
                 md.append(table([[k, v["hr_per_sd"], v["p"]] for k, v in er["cox"].items()], ["covariate", "HR/SD", "p"]))
             c = er.get("classifier_10m")
             if c:
+                md.append(f"\nActive tokens only (>=10 trades by landmark): AUC {f(c.get('auc_active_tokens'))}, "
+                          f"n {c.get('active_test_n')}, event rate {f(c.get('active_test_rate'))}\n")
                 md.append(f"\nClassifier, event within {surv['window_s']}s (chronological test): AUC {f(c['auc'])}, "
                           f"Brier {f(c['brier'], 4)} vs base-rate {f(c['brier_baseline'], 4)}, test rate {f(c['test_rate'])}\n")
                 md.append(table([[x["pred"], x["obs"], x["n"]] for x in c["calibration"]], ["mean predicted", "observed", "n"]))
