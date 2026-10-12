@@ -1,0 +1,37 @@
+{
+  "paper_signals": 1546,
+  "data_lag_s": {
+    "p50": 0.14217543601989746,
+    "p90": 6.975938796997064,
+    "p99": 20.886527085304262,
+    "n": 1703
+  },
+  "latency_slots_real_p50": 8.0,
+  "ret_at_measured_latency": {
+    "n": 1459,
+    "mean": -0.0338582910692255,
+    "median": -0.03317115,
+    "se": 0.003939896643300156,
+    "hit": 0.07059629883481837,
+    "sum_sol": null
+  },
+  "ret_at_assumed_latency": {
+    "n": 1543,
+    "mean": -0.01582303511341543,
+    "median": -0.03317115,
+    "se": 0.015465457838136128,
+    "hit": 0.07582631237848347,
+    "sum_sol": null
+  },
+  "skips_at_measured_latency": {
+    "": 1459,
+    "slippage": 8,
+    "fail": 78,
+    "graduated": 1
+  },
+  "fill_check": {
+    "entries_with_real_buys_in_landing_slot": 53,
+    "sim_price_at_or_above_real_min": 0.9622641509433962,
+    "median_sim_vs_real_max": 0.004112411256567583
+  }
+}

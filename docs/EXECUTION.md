@@ -68,3 +68,12 @@ the window are null for the same reason.
 | `p_fail` 5% (pump-native errors are rarer; network drops are not modelled) | uncertain; swept |
 | No MEV sandwiching of our orders beyond the slippage limit | optimistic; the slippage limit caps the damage |
 | Jito tips not modelled separately (folded into the priority fee) | uncertain; swept via `--priority-fee` |
+
+## Validation against live data
+
+`slotfish paper` evaluates each paper trade at its *measured* latency and
+checks the simulated entry against real buys that landed in the same slot.
+On 2026-10-12 (60 min live), in 96% of comparable entries the simulated
+price was at or above the cheapest real buy, with a median 0.41% above the
+most expensive one. That confirms end-of-slot fills are conservative.
+Measured data lag on the free RPC: p50 0.14 s, p90 7 s, p99 21 s.

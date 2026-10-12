@@ -158,9 +158,40 @@ dominates every hazard (HR 3.3 to 11 per SD): activity is what makes
 anything happen. Curve progress raises graduation hazard (HR 1.57) and
 lowers collapse hazard (HR 0.65).
 
-## Phase 5: live paper trading
+## Phase 5: live paper trading (2026-10-12, 09:21 to 10:21 EDT)
 
-See the section appended below once the session finishes.
+`slotfish paper` tailed confirmed blocks live for 60 minutes (16.4k slots,
+975k events), warm-started from the study window so wallet skill was
+populated. It scored every decision point with the exported 2 m LightGBM
+model, using the threshold chosen on validation; the Rust scorer matches
+Python to 6e-17. Nothing was sent to the chain. Summary: `results/paper.json`.
+
+| | |
+|---|---|
+| Paper entries | 1,546 signals: 1,459 settled round trips, 78 simulated failures, 8 slippage rejects, 1 graduated |
+| Data lag (block time to block in hand) | **p50 0.14 s, p90 7.0 s, p99 21 s** |
+| Effective latency used (lag + 1 submit slot) | median 8 slots (1.7 s) |
+| Net return per trade at **measured** latency | **-3.4%** (SE 0.4%), hit rate 7.1% |
+| Net return at the backtest's assumed 2-slot latency | -1.6% (SE 1.5%; median -3.3%; the mean is lifted by one outlier) |
+| Backtest, same model, test window | -3.3% per trade |
+
+* **Live replicates the backtest.** -3.4% live vs -3.3% in the backtest,
+  on data that is a day newer than the study window. The 7% hit rate shows
+  what the model does: it picks tokens that then barely move, so the round
+  trip mostly pays the ~2.5% swap fees plus transaction costs.
+* **The fill model is conservative.** For 53 entries, real curve buys of the
+  same token landed in the same slot as our simulated order. In 96% of
+  those, our simulated price was at or above the cheapest real buy, and the
+  median was 0.41% *above* the most expensive real buy. End-of-slot filling
+  prices us behind everyone in the slot, as intended.
+* **Infrastructure.** The free RPC delivers confirmed blocks with
+  sub-second median lag, but only keeps pace with the chain at 6 workers and
+  24-slot batches. With 4 workers it fell behind by ~7 s/minute. The p90/p99
+  tail (7 s, 21 s) comes from rate-limit retries, and that tail alone rules
+  out anything latency-sensitive on free infrastructure.
+
+**Verdict for real execution: do not.** No strategy has positive expected
+value net of costs in either the backtest or live paper trading.
 
 ## Engine benchmark (6.36M events, 16-thread desktop, Windows)
 
