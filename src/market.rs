@@ -23,7 +23,7 @@ pub struct MintInfo {
     /// tokens are excluded from trading.
     pub mayhem: bool,
     /// Launched as a standard SOL-quoted curve (CreateEvent virtual SOL = 30 SOL).
-    /// Curves quoted in other assets report zero SOL amounts and reserves, so
+    /// Curves quoted in other assets report quote-asset units in the SOL fields, so
     /// SOL-denominated execution cannot be simulated on them.
     pub sol_quoted: bool,
     /// First slot with a zero-fee curve trade (Mayhem-agent activity on a token

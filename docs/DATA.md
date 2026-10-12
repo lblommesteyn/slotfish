@@ -77,8 +77,8 @@ the store).
   its first zero-fee trade (point-in-time rule, `MintInfo::tradable_at`).
 
 * **Non-SOL quote curves.** About 6% of curve trades belong to tokens whose
-  curve is quoted in another asset: their TradeEvents report zero SOL amounts
-  and reserves. They are identified at launch (CreateEvent virtual SOL differs
+  curve is quoted in another asset: their TradeEvents report the quote
+  asset's amounts and reserves in the SOL fields (often zero). They are identified at launch (CreateEvent virtual SOL differs
   from the standard 30 SOL) and excluded, since SOL-denominated execution
   cannot be simulated on them.
 
