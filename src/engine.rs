@@ -58,7 +58,7 @@ pub struct RunStats {
     pub events: usize,
     pub decisions: usize,
     pub elapsed_s: f64,
-    /// Per-event processing latency samples (ns), every event.
+    /// Per-slot processing latency samples (ns): time to process one block's events.
     pub latency_ns: Vec<u32>,
 }
 
@@ -90,7 +90,7 @@ impl<'a> Replay<'a> {
         };
         let mut feats: Vec<f32> = Vec::new();
         let mut decisions = 0usize;
-        let mut lat = Vec::with_capacity(if measure_latency { t.len() } else { 0 });
+        let mut lat = Vec::new();
         let ex = &cfg.exec;
         let t0 = Instant::now();
 
@@ -174,13 +174,17 @@ impl<'a> Replay<'a> {
             }
         };
 
+        // Latency is measured per slot (one block's worth of events), the unit a
+        // live trader processes; per-event times are below timer resolution.
+        let mut slot_start: Option<(u64, Instant)> = None;
         for i in 0..t.len() {
-            let ts = if measure_latency {
-                Some(Instant::now())
-            } else {
-                None
-            };
             let slot = t.slot[i];
+            if measure_latency && slot_start.is_none_or(|(s, _)| s != slot) {
+                if let Some((_, t0)) = slot_start {
+                    lat.push(t0.elapsed().as_nanos().min(u32::MAX as u128) as u32);
+                }
+                slot_start = Some((slot, Instant::now()));
+            }
             settle(
                 slot,
                 &mut queue,
@@ -239,9 +243,9 @@ impl<'a> Replay<'a> {
                     queue.push(Reverse((slot + ex.latency_slots, Order::Entry(k))));
                 }
             }
-            if let Some(ts) = ts {
-                lat.push(ts.elapsed().as_nanos().min(u32::MAX as u128) as u32);
-            }
+        }
+        if let Some((_, t0)) = slot_start {
+            lat.push(t0.elapsed().as_nanos().min(u32::MAX as u128) as u32);
         }
         // Drain orders that land within the data; the rest are censored.
         settle(

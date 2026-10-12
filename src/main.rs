@@ -547,7 +547,8 @@ fn main() -> Result<()> {
                 let p999 = percentile(&mut lat_all, 0.999);
                 out[name] = serde_json::json!({
                     "best_s": best, "events_per_s": tape.len() as f64 / best,
-                    "latency_ns_p50": p50, "latency_ns_p99": p99, "latency_ns_p999": p999,
+                    "slot_latency_us_p50": p50 as f64 / 1e3, "slot_latency_us_p99": p99 as f64 / 1e3,
+                    "slot_latency_us_p999": p999 as f64 / 1e3, "slots_timed": lat_all.len(),
                 });
             }
             if let Some(m) = memory_stats::memory_stats() {

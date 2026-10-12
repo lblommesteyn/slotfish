@@ -45,7 +45,8 @@ GROUPS: dict[str, list[str]] = {
         "age_slots", "log_mcap_sol", "progress", "n_trades", "n_buyers", "creator_sold",
         "creator_hold_frac", "launch_snipers",
     ],
-    "wallet": ["skill_last_buyer", "skill_n_last_buyer", "skill_wavg_75", "smart_buys_75", "smart_sol_75"],
+    "wallet": ["skill_last_buyer", "skill_n_last_buyer", "skill_wavg_75", "smart_buys_75", "smart_sol_75",
+               "coord_pairs_75", "coord_wallets_75"],
 }
 ALL = [f for g in GROUPS.values() for f in g]
 

@@ -9,6 +9,12 @@
 //! followed by a +HURDLE price move within `skill_horizon` slots". An outcome is
 //! only revealed to the posterior once the replay clock passes
 //! buy_slot + skill_horizon, so skill never peeks at the future.
+//!
+//! Coordination: a wallet pair is "linked" when both wallets were among the
+//! first EARLY_N distinct buyers of at least COORD_MIN earlier tokens. Pair
+//! counts are incremented the moment the second wallet's early buy happens,
+//! and the current token's own contribution is subtracted, so the feature
+//! only reflects co-buying in *previous* tokens.
 
 use crate::events::Kind;
 use crate::market::Timeline;
@@ -20,6 +26,9 @@ pub const SKILL_HURDLE: f64 = 0.03; // must beat round-trip fees to count as a w
 pub const PRIOR_A: f64 = 1.0;
 pub const PRIOR_B: f64 = 4.0;
 const WINDOW: u64 = 300;
+const EARLY_N: usize = 20;
+const COORD_MIN: u32 = 2;
+const COORD_RECENT: usize = 20;
 
 pub const FEATURE_NAMES: &[&str] = &[
     "age_slots",
@@ -54,6 +63,8 @@ pub const FEATURE_NAMES: &[&str] = &[
     "skill_wavg_75",
     "smart_buys_75",
     "smart_sol_75",
+    "coord_pairs_75",
+    "coord_wallets_75",
 ];
 
 #[derive(Clone, Copy)]
@@ -74,6 +85,8 @@ struct MintState {
     creator_tokens: i128,
     creator_sold: bool,
     snipers: u32,
+    /// First EARLY_N distinct non-creator buyers.
+    early: Vec<u32>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -93,6 +106,8 @@ pub struct FeatureEngine {
     skill: HashMap<u32, Skill>,
     /// (resolve_slot, mint, user, entry_price) pending skill outcomes.
     pending: BinaryHeap<Reverse<(u64, u32, u32, u64)>>,
+    /// Wallet pair (lo << 32 | hi) -> (tokens co-bought early, last mint counted).
+    pairs: HashMap<u64, (u32, u32)>,
     pub skill_horizon: u64,
     pub min_smart_n: f64,
     pub smart_threshold: f64,
@@ -100,12 +115,18 @@ pub struct FeatureEngine {
 
 const TOTAL_SUPPLY: f64 = 1e15; // 1B tokens, 6 decimals
 
+fn pair_key(a: u32, b: u32) -> u64 {
+    let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+    ((lo as u64) << 32) | hi as u64
+}
+
 impl FeatureEngine {
     pub fn new(skill_horizon: u64) -> Self {
         FeatureEngine {
             mints: Vec::new(),
             skill: HashMap::new(),
             pending: BinaryHeap::new(),
+            pairs: HashMap::new(),
             skill_horizon,
             min_smart_n: 5.0,
             smart_threshold: 0.35,
@@ -158,9 +179,23 @@ impl FeatureEngine {
                 ms.peak_sol = ms.peak_sol.max(t.vsol[i]);
                 let user = t.user[i];
                 if t.is_buy[i] {
-                    ms.buyers.insert(user);
+                    let new_buyer = ms.buyers.insert(user);
                     if info.create_slot == Some(slot) && info.creator != Some(user) {
                         ms.snipers += 1;
+                    }
+                    if new_buyer
+                        && info.in_cohort()
+                        && info.creator != Some(user)
+                        && ms.early.len() < EARLY_N
+                    {
+                        for &e in &ms.early {
+                            let c = self.pairs.entry(pair_key(e, user)).or_insert((0, u32::MAX));
+                            if c.1 != m as u32 {
+                                c.0 += 1;
+                                c.1 = m as u32;
+                            }
+                        }
+                        ms.early.push(user);
                     }
                 }
                 if info.creator == Some(user) {
@@ -257,6 +292,31 @@ impl FeatureEngine {
         uniq75.dedup();
         same_slot.sort_unstable();
         same_slot.dedup();
+        // Coordination among the most recent distinct buyers in the 75-slot window.
+        let mut recent: Vec<u32> = Vec::with_capacity(COORD_RECENT);
+        for k in ms.ticks.iter().rev() {
+            if slot - k.slot > 75 || recent.len() == COORD_RECENT {
+                break;
+            }
+            if k.is_buy && !recent.contains(&k.user) {
+                recent.push(k.user);
+            }
+        }
+        let (mut coord_pairs, mut coord_wallets) = (0u32, Vec::new());
+        for a in 0..recent.len() {
+            for b in a + 1..recent.len() {
+                if let Some(&(c, last_m)) = self.pairs.get(&pair_key(recent[a], recent[b])) {
+                    let prev = c - u32::from(last_m == m);
+                    if prev >= COORD_MIN {
+                        coord_pairs += 1;
+                        coord_wallets.push(recent[a]);
+                        coord_wallets.push(recent[b]);
+                    }
+                }
+            }
+        }
+        coord_wallets.sort_unstable();
+        coord_wallets.dedup();
         let last = ms.ticks.back().copied();
         let prev_slot = ms.ticks.iter().rev().nth(1).map(|k| k.slot);
         let (sk, skn) = if t.is_buy[i] {
@@ -311,6 +371,8 @@ impl FeatureEngine {
             },
             smart_buys as f32,
             smart_sol as f32,
+            coord_pairs as f32,
+            coord_wallets.len() as f32,
         ]);
         debug_assert_eq!(out.len(), FEATURE_NAMES.len());
     }
