@@ -140,18 +140,21 @@ def export_model(path: Path, payload: dict, feats: list[str], predict, x_sample:
     path.with_suffix(".verify.json").write_text(json.dumps(verify))
 
 
-def hour_block_bootstrap(values: np.ndarray, hours: np.ndarray, n=2000, seed=SEED) -> tuple[float, float]:
-    """95% CI of the mean, resampling whole hours (trades within an hour are dependent)."""
+BLOCK_SECS = 900  # IC blocks: 15 minutes
+
+
+def cluster_bootstrap(values: np.ndarray, clusters: np.ndarray, n=2000, seed=SEED) -> tuple[float, float]:
+    """95% CI of the mean, resampling whole clusters (tokens: trades on one token are dependent)."""
     if len(values) == 0:
         return (float("nan"), float("nan"))
     rng = np.random.default_rng(seed)
-    uh = np.unique(hours)
-    groups = [values[hours == h] for h in uh]
-    sums = np.array([g.sum() for g in groups])
-    cnts = np.array([len(g) for g in groups])
+    _, inv = np.unique(clusters, return_inverse=True)
+    sums = np.bincount(inv, weights=values)
+    cnts = np.bincount(inv)
+    k = len(sums)
     means = []
     for _ in range(n):
-        idx = rng.integers(0, len(uh), len(uh))
+        idx = rng.integers(0, k, k)
         c = cnts[idx].sum()
         if c:
             means.append(sums[idx].sum() / c)
@@ -160,13 +163,14 @@ def hour_block_bootstrap(values: np.ndarray, hours: np.ndarray, n=2000, seed=SEE
 
 def evaluate(pred: np.ndarray, d: pl.DataFrame, h: str) -> dict:
     y = d[f"ret_net_{h}"].to_numpy()
-    hours = (d["block_time"].to_numpy() // 3600)
+    hours = (d["block_time"].to_numpy() // BLOCK_SECS)
+    mints = d["mint"].to_numpy()
     out = {"n": int(len(y)), "base_mean_ret": float(y.mean()), "base_hit": float((y > 0).mean())}
     if len(y) < 50 or np.std(pred) == 0:
         return out
     out["ic_spearman"] = float(spearmanr(pred, y).statistic)
     out["auc_sign"] = float(roc_auc_score(y > 0, pred)) if 0 < (y > 0).mean() < 1 else float("nan")
-    # IC per hour -> t-stat across hours (robust to within-hour dependence)
+    # IC per 15-minute block -> t-stat across blocks (robust to within-block dependence)
     ics = []
     for hh in np.unique(hours):
         m = hours == hh
@@ -174,31 +178,31 @@ def evaluate(pred: np.ndarray, d: pl.DataFrame, h: str) -> dict:
             ics.append(spearmanr(pred[m], y[m]).statistic)
     if len(ics) >= 3:
         ics = np.array(ics)
-        out["ic_hourly_mean"] = float(ics.mean())
-        out["ic_hourly_t"] = float(ics.mean() / (ics.std(ddof=1) / np.sqrt(len(ics))))
-        out["ic_hours"] = len(ics)
+        out["ic_block_mean"] = float(ics.mean())
+        out["ic_block_t"] = float(ics.mean() / (ics.std(ddof=1) / np.sqrt(len(ics))))
+        out["ic_blocks"] = len(ics)
     q = np.quantile(pred, [0.9, 0.99])
     for name, thr in (("top10", q[0]), ("top1", q[1])):
         m = pred >= thr
         out[f"{name}_n"] = int(m.sum())
         out[f"{name}_mean_ret"] = float(y[m].mean())
-        out[f"{name}_ci95"] = hour_block_bootstrap(y[m], hours[m])
+        out[f"{name}_ci95"] = cluster_bootstrap(y[m], mints[m])
         out[f"{name}_hit"] = float((y[m] > 0).mean())
     return out
 
 
 def paired_ic_test(pa: np.ndarray, pb: np.ndarray, y: np.ndarray, hours: np.ndarray) -> dict:
-    """Is model A's rank IC higher than B's? Paired over hours (each hour one observation)."""
+    """Is model A's rank IC higher than B's? Paired over 15-minute blocks (one observation each)."""
     diffs = []
     for hh in np.unique(hours):
         m = hours == hh
         if m.sum() >= 30 and np.std(pa[m]) > 0 and np.std(pb[m]) > 0:
             diffs.append(spearmanr(pa[m], y[m]).statistic - spearmanr(pb[m], y[m]).statistic)
     if len(diffs) < 3:
-        return {"hours": len(diffs)}
+        return {"blocks": len(diffs)}
     d = np.array(diffs)
     t = d.mean() / (d.std(ddof=1) / np.sqrt(len(d)))
-    return {"hours": len(d), "mean_ic_diff": float(d.mean()), "t": float(t), "frac_hours_positive": float((d > 0).mean())}
+    return {"blocks": len(d), "mean_ic_diff": float(d.mean()), "t": float(t), "frac_blocks_positive": float((d > 0).mean())}
 
 
 def calibration(pred: np.ndarray, y: np.ndarray, bins: int = 10) -> list[dict]:
@@ -270,7 +274,7 @@ def run(dataset: Path, out_dir: Path, purge_secs: float = 630.0) -> dict:
             ev["threshold"] = thr
             m = pt >= thr["threshold"]
             ev["test_at_val_threshold"] = {"n": int(m.sum()), "mean_ret": float(yt[m].mean()) if m.any() else None,
-                                           "ci95": hour_block_bootstrap(yt[m], dt["block_time"].to_numpy()[m] // 3600)}
+                                           "ci95": cluster_bootstrap(yt[m], dt["mint"].to_numpy()[m])}
             ev["calibration_test"] = calibration(pt, yt)
             hr["models"][name] = ev
             # Signal over ALL test decision rows (labelled or not), for the engine.
@@ -289,7 +293,7 @@ def run(dataset: Path, out_dir: Path, purge_secs: float = 630.0) -> dict:
             f, _ = fit_lgbm(a, b, av, bv)
             preds[fs_name] = f(at)
             hr["ablation"][fs_name] = evaluate(preds[fs_name], dta, h)
-        hours_t = dt["block_time"].to_numpy() // 3600
+        hours_t = dt["block_time"].to_numpy() // BLOCK_SECS
         hr["wallet_increment"] = {
             "momentum+wallet_vs_momentum_only": paired_ic_test(preds["momentum+wallet"], preds["momentum_only"], yt, hours_t),
             "all_vs_no_wallet": paired_ic_test(preds["all"], preds["no_wallet"], yt, hours_t),

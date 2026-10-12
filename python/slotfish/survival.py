@@ -19,7 +19,7 @@ Endpoints:
                The curve's 30 SOL virtual floor means price never drops below
                the launch price, so -80% is only reachable after a >=5x pump.
 
-Models: Kaplan-Meier curves, a Cox model (statsmodels PHReg) on a few
+Models: Kaplan-Meier curves, a ridge-penalized Cox model (Breslow ties) on a few
 interpretable covariates, and a LightGBM classifier for "event within
 WINDOW_S of the landmark", trained on early launches and tested on later ones
 (chronological split by launch slot).
@@ -34,20 +34,55 @@ import lightgbm as lgb
 import numpy as np
 import polars as pl
 from sklearn.metrics import brier_score_loss, roc_auc_score
-from statsmodels.duration.hazard_regression import PHReg
+from scipy.stats import norm
 
 LANDMARK_S = 60.0
 WINDOW_S = 600.0
 COLLAPSE_FRAC = 0.2
 COLLAPSE_MIN_SOL = 1.0
 DD_LEVELS = {"drawdown50": 0.5, "drawdown80": 0.2}
-COX_COVARIATES = ["log_n_trades", "n_buyers_log", "progress", "creator_sold", "launch_snipers_log", "ret_300"]
+# n_buyers is omitted: it is 0.99 correlated with n_trades in the landmark data.
+COX_COVARIATES = ["log_n_trades", "progress", "creator_sold", "launch_snipers_log", "ret_300", "drawdown_from_peak"]
 CLF_FEATURES = [
     "n_trades", "n_buyers", "progress", "log_mcap_sol", "creator_sold", "creator_hold_frac", "launch_snipers",
     "netflow_75_sol", "netflow_300_sol", "buys_75", "sells_75", "uniq_buyers_75", "ret_75", "ret_300",
     "drawdown_from_peak", "skill_wavg_75", "smart_buys_75",
 ]
 SEED = 20261012
+
+
+def cox_ridge(t: np.ndarray, e: np.ndarray, X: np.ndarray, l2: float = 1.0, iters: int = 100) -> tuple[np.ndarray, np.ndarray]:
+    """Cox PH (Breslow ties) by Newton's method with a small L2 penalty.
+
+    The penalty keeps coefficients finite under (quasi-)separation, which is
+    common here (e.g. covariates that are zero for every dead token).
+    Returns (beta, two-sided Wald p-values from the penalized information).
+    """
+    order = np.argsort(-t, kind="stable")  # descending time: risk sets are prefixes
+    t, e, X = t[order], e[order], X[order]
+    n, k = X.shape
+    beta = np.zeros(k)
+    for _ in range(iters):
+        eta = np.clip(X @ beta, -50, 50)
+        w = np.exp(eta)
+        S0 = np.cumsum(w)
+        S1 = np.cumsum(w[:, None] * X, axis=0)
+        S2 = np.cumsum(w[:, None, None] * X[:, :, None] * X[:, None, :], axis=0)
+        # Breslow: tied event times share the risk set of their last (smallest-index) member.
+        last = np.searchsorted(-t, -t, side="right") - 1
+        ev = e > 0
+        m1 = S1[last[ev]] / S0[last[ev], None]
+        grad = (X[ev] - m1).sum(0) - l2 * beta
+        info = (S2[last[ev]] / S0[last[ev], None, None] - m1[:, :, None] * m1[:, None, :]).sum(0) + l2 * np.eye(k)
+        step = np.linalg.solve(info, grad)
+        norm_ = np.abs(step).max()
+        if norm_ > 0.5:  # damped Newton: never move a coefficient more than 0.5 per iteration
+            step *= 0.5 / norm_
+        beta += step
+        if np.abs(step).max() < 1e-8:
+            break
+    se = np.sqrt(np.diag(np.linalg.inv(info)))
+    return beta, 2 * norm.sf(np.abs(beta / se))
 
 
 def kaplan_meier(t: np.ndarray, e: np.ndarray, grid: np.ndarray) -> np.ndarray:
@@ -151,18 +186,20 @@ def run(events_dir: Path, dataset: Path, out_dir: Path) -> dict:
     endpoints = [("graduation", "grad_slot"), ("collapse", "collapse_slot")] + [(n, f"{n}_slot") for n in DD_LEVELS]
     for name, col in endpoints:
         d = endpoint_frame(df, col, end_slot, slot_secs)
-        t, e = d["time_s"].to_numpy(), d["event"].to_numpy()
+        # Explicit float copies (polars zero-copy views are read-only).
+        t = np.array(d["time_s"].to_numpy(), dtype=float, copy=True)
+        e = np.array(d["event"].to_numpy(), dtype=float, copy=True)
         er: dict = {"at_risk": int(len(d)), "events": int(e.sum()),
                     "km_cum_incidence": dict(zip([f"{g}s" for g in grid], (1 - kaplan_meier(t, e, grid)).round(4).tolist()))}
         # Cox PH on interpretable covariates (standardized).
-        X = d.select(COX_COVARIATES).fill_null(0.0).to_numpy()
-        X = (X - X.mean(0)) / (X.std(0) + 1e-9)
-        try:
-            ph = PHReg(t, X, status=e, ties="efron").fit()
-            er["cox"] = {c: {"hr_per_sd": float(np.exp(b)), "p": float(p)}
-                         for c, b, p in zip(COX_COVARIATES, ph.params, ph.pvalues)}
-        except Exception as exc:  # noqa: BLE001
-            er["cox_error"] = str(exc)
+        X = d.select(COX_COVARIATES).fill_null(0.0).fill_nan(0.0).to_numpy().astype(float)
+        keep = X.std(0) > 1e-9
+        cov = [c for c, k in zip(COX_COVARIATES, keep) if k]
+        X = X[:, keep]
+        X = (X - X.mean(0)) / X.std(0)
+        if e.sum() >= 5 and X.shape[1]:
+            beta, pv = cox_ridge(t, e, X)
+            er["cox"] = {c: {"hr_per_sd": float(np.exp(b)), "p": float(p)} for c, b, p in zip(cov, beta, pv)}
         # Classifier: event within WINDOW_S of landmark; only tokens observed for the full window.
         full = d.filter(pl.col("landmark_slot") + int(WINDOW_S / slot_secs) <= end_slot).sort("create_slot")
         yw = ((full["event"] == 1) & (full["time_s"] <= WINDOW_S)).to_numpy().astype(int)
@@ -182,7 +219,13 @@ def run(events_dir: Path, dataset: Path, out_dir: Path) -> dict:
                 mk = (p >= bins[k]) & ((p <= bins[k + 1]) if k == 4 else (p < bins[k + 1]))
                 if mk.sum():
                     calib.append({"pred": float(p[mk].mean()), "obs": float(yt[mk].mean()), "n": int(mk.sum())})
+            # Harder subset: tokens with real activity by the landmark (dead tokens are trivially easy).
+            act = full["n_trades"].to_numpy()[cut:] >= 10
+            auc_active = (float(roc_auc_score(yt[act], p[act]))
+                          if act.sum() > 20 and 0 < yt[act].mean() < 1 else None)
             er["classifier_10m"] = {
+                "auc_active_tokens": auc_active, "active_test_n": int(act.sum()),
+                "active_test_rate": float(yt[act].mean()) if act.any() else None,
                 "train_n": cut, "test_n": int(len(yt)), "test_rate": float(yt.mean()),
                 "auc": float(roc_auc_score(yt, p)), "brier": float(brier_score_loss(yt, p)),
                 "brier_baseline": float(brier_score_loss(yt, np.full_like(p, base))),

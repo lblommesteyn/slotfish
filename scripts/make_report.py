@@ -50,18 +50,18 @@ def main() -> None:
             rows = []
             for name, ev in hr["models"].items():
                 tv = ev["test_at_val_threshold"]
-                rows.append([name, ev.get("ic_spearman"), ev.get("ic_hourly_mean"), ev.get("ic_hourly_t"),
+                rows.append([name, ev.get("ic_spearman"), ev.get("ic_block_mean"), ev.get("ic_block_t"),
                              ev.get("auc_sign"), ev.get("top10_mean_ret"), ev.get("top10_ci95"),
                              ev.get("top1_mean_ret"), ev.get("top1_ci95"), ev["threshold"]["val_mean_ret"],
                              tv["n"], tv["mean_ret"], tv["ci95"]])
-            md.append(table(rows, ["model", "test IC", "hourly IC", "hourly t", "AUC", "top10% ret", "CI95",
+            md.append(table(rows, ["model", "test IC", "15m-block IC", "block t", "AUC", "top10% ret", "CI95",
                                    "top1% ret", "CI95", "val ret @thr", "test n @thr", "test ret @thr", "CI95"]))
             md.append("\n**Ablation (LightGBM, test):**\n")
-            md.append(table([[k, v.get("ic_spearman"), v.get("ic_hourly_t"), v.get("top10_mean_ret"), v.get("top1_mean_ret")]
-                             for k, v in hr["ablation"].items()], ["feature set", "IC", "hourly t", "top10% ret", "top1% ret"]))
-            md.append("\n**Wallet increment (paired over hours):**\n")
-            md.append(table([[k, v.get("mean_ic_diff"), v.get("t"), v.get("frac_hours_positive"), v.get("hours")]
-                             for k, v in hr["wallet_increment"].items()], ["comparison", "mean IC diff", "t", "frac hours >0", "hours"]))
+            md.append(table([[k, v.get("ic_spearman"), v.get("ic_block_t"), v.get("top10_mean_ret"), v.get("top1_mean_ret")]
+                             for k, v in hr["ablation"].items()], ["feature set", "IC", "block t", "top10% ret", "top1% ret"]))
+            md.append("\n**Wallet increment (paired over 15-minute blocks):**\n")
+            md.append(table([[k, v.get("mean_ic_diff"), v.get("t"), v.get("frac_blocks_positive"), v.get("blocks")]
+                             for k, v in hr["wallet_increment"].items()], ["comparison", "mean IC diff", "t", "frac blocks >0", "blocks"]))
             md.append("\n**LightGBM gain share (top 10):**\n")
             md.append(table([[k, v] for k, v in list(hr["lgbm_gain"].items())[:10]], ["feature", "gain"]))
             cal = hr["models"]["lgbm"].get("calibration_test", [])
@@ -73,7 +73,7 @@ def main() -> None:
     if bt:
         md.append("\n## Test-window backtests (event-driven engine, default execution)\n")
         cols = ["signals", "entered", "failed_entries", "slippage_rejects", "censored", "net_pnl_sol", "cost_sol",
-                "mean_ret", "ret_t_stat", "hit_rate", "sharpe_hourly_ann", "max_drawdown_sol", "turnover_sol", "exits_on_amm"]
+                "mean_ret", "ret_t_stat", "hit_rate", "sharpe_15m_ann", "max_drawdown_sol", "turnover_sol", "exits_on_amm"]
         for h, rows in bt["results"].items():
             md.append(f"\n### Hold {h}\n")
             md.append(table([[k] + [v.get(c) for c in cols] for k, v in rows.items()], ["strategy"] + cols))

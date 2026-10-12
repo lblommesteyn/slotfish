@@ -1,0 +1,24 @@
+{
+  "events": 1185481,
+  "index_s": 0.0319735,
+  "load_s": 1.1828763,
+  "physical_mem_bytes": 152555520,
+  "replay_momentum_features": {
+    "best_s": 0.1678608,
+    "events_per_s": 7062286.13231916,
+    "slot_latency_us_p50": 7.7,
+    "slot_latency_us_p99": 28.7,
+    "slot_latency_us_p999": 67.1,
+    "slots_timed": 19998
+  },
+  "replay_no_trade": {
+    "best_s": 0.017687,
+    "events_per_s": 67025555.492734775,
+    "slot_latency_us_p50": 0.8,
+    "slot_latency_us_p99": 2.6,
+    "slot_latency_us_p999": 5.1,
+    "slots_timed": 19998
+  },
+  "tape_column_bytes": 101951366,
+  "threads": 16
+}

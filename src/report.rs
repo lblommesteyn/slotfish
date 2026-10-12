@@ -20,8 +20,9 @@ pub struct Report {
     pub median_ret: f64,
     pub ret_t_stat: f64,
     pub hit_rate: f64,
-    /// Sharpe of hourly P&L (sum of trade P&L by exit hour), annualised by sqrt(24*365).
-    pub sharpe_hourly_ann: f64,
+    /// Sharpe of 15-minute P&L buckets (trade P&L summed by exit time, empty buckets
+    /// count as zero), annualised by sqrt(4*24*365).
+    pub sharpe_15m_ann: f64,
     pub max_drawdown_sol: f64,
     pub turnover_sol: f64,
     pub exits_on_amm: usize,
@@ -79,18 +80,18 @@ pub fn summarize(name: &str, trades: &[RoundTrip], size: u64, slot_secs: f64) ->
         r.max_drawdown_sol = r.max_drawdown_sol.max(peak - cum);
     }
     if let (Some(first), Some(last)) = (by_exit.first(), by_exit.last()) {
-        let slots_per_hour = (3600.0 / slot_secs) as u64;
-        let nh = ((last.0 - first.0) / slots_per_hour + 1) as usize;
-        let mut hourly = vec![0.0f64; nh];
+        let slots_per_bucket = (900.0 / slot_secs) as u64;
+        let nh = ((last.0 - first.0) / slots_per_bucket + 1) as usize;
+        let mut buckets = vec![0.0f64; nh];
         for &(s, p) in &by_exit {
-            hourly[((s - first.0) / slots_per_hour) as usize] += p;
+            buckets[((s - first.0) / slots_per_bucket) as usize] += p;
         }
         if nh > 1 {
-            let mu = hourly.iter().sum::<f64>() / nh as f64;
+            let mu = buckets.iter().sum::<f64>() / nh as f64;
             let sd =
-                (hourly.iter().map(|x| (x - mu).powi(2)).sum::<f64>() / (nh as f64 - 1.0)).sqrt();
+                (buckets.iter().map(|x| (x - mu).powi(2)).sum::<f64>() / (nh as f64 - 1.0)).sqrt();
             if sd > 0.0 {
-                r.sharpe_hourly_ann = mu / sd * (24.0f64 * 365.0).sqrt();
+                r.sharpe_15m_ann = mu / sd * (4.0f64 * 24.0 * 365.0).sqrt();
             }
         }
     }
