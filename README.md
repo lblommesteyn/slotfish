@@ -31,7 +31,8 @@ scripts/fetch_supervised.sh --start <slot> --end <slot>   # restarts on crash
 python scripts/run_baseline.py
 cargo test --release
 # live paper trading with an exported model (no transactions are ever sent)
-./target/release/slotfish paper --model results/research/model_lgbm_2m.json \n    --threshold=<val threshold> --warm data/events --workers 6
+./target/release/slotfish paper --model results/research/model_lgbm_2m.json \
+    --threshold=<val threshold> --warm data/events --workers 6
 python scripts/paper_report.py
 ```
 
