@@ -83,7 +83,8 @@ def token_table(events_dir: Path) -> tuple[pl.DataFrame, float, int]:
                        pl.col("block_time").min().alias("b0"), pl.col("block_time").max().alias("b1")).collect()
     s0, s1, b0, b1 = bounds.row(0)
     slot_secs = (b1 - b0) / (s1 - s0)
-    creates = (ev.filter((pl.col("kind") == 0) & ~pl.col("is_buy"))
+    # Cohort: SOL-quoted (30 SOL virtual at launch), not Mayhem mode; both launch-time facts.
+    creates = (ev.filter((pl.col("kind") == 0) & ~pl.col("is_buy") & (pl.col("vsol") == 30_000_000_000))
                .select(pl.col("mint"), pl.col("slot").alias("create_slot")).collect())
     trades = (ev.filter(pl.col("kind") == 1).select("mint", "slot", "tx_idx", "ev_idx", "vsol", "vtok", "rsol", "fee_bps")
               .join(creates.lazy(), on="mint").sort(["mint", "slot", "tx_idx", "ev_idx"]).collect())

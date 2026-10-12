@@ -54,6 +54,11 @@ fn curve_reserves_are_continuous_for_cohort() {
             continue;
         }
         let m = t.mint[i] as usize;
+        // Standard curves can never go below their 30 SOL virtual floor.
+        assert!(
+            t.vsol[i] >= slotfish::market::STANDARD_VIRTUAL_SOL,
+            "vsol below floor at {i}"
+        );
         let (pre_sol, pre_tok) = if t.is_buy[i] {
             (t.vsol[i] - t.sol_amount[i], t.vtok[i] + t.token_amount[i])
         } else {
@@ -126,7 +131,7 @@ fn features_use_no_future_information() {
     // Features at event i computed on the full tape must equal features computed
     // on a tape that physically ends at event i.
     let (t, tl) = fixture();
-    let mut full = FeatureEngine::new(&t, &tl, 50);
+    let mut full = FeatureEngine::new(50);
     let mut fa = Vec::new();
     let mut fb = Vec::new();
     let mut checked = 0;
@@ -136,17 +141,17 @@ fn features_use_no_future_information() {
         .collect();
     let mut next_probe = probes.iter().peekable();
     for i in 0..t.len() {
-        full.update(i);
+        full.update(&t, &tl, i);
         if next_probe.peek() == Some(&&i) {
             next_probe.next();
-            full.features(i, &mut fa);
+            full.features(&t, &tl, i, &mut fa);
             let pt = t.prefix(i + 1);
             let ptl = Timeline::build(&pt);
-            let mut fe = FeatureEngine::new(&pt, &ptl, 50);
+            let mut fe = FeatureEngine::new(50);
             for j in 0..=i {
-                fe.update(j);
+                fe.update(&pt, &ptl, j);
             }
-            fe.features(i, &mut fb);
+            fe.features(&pt, &ptl, i, &mut fb);
             for (k, (a, b)) in fa.iter().zip(fb.iter()).enumerate() {
                 assert!(
                     a == b || (a.is_nan() && b.is_nan()),

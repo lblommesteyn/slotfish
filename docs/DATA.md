@@ -60,15 +60,27 @@ the store).
 * **PumpSwap layout** was pinned empirically (`scripts/dev/amm_layout.py`):
   the pool quote reserve moves by `quote_amount_in_with_lp_fee` (buys) /
   `quote_amount_out_without_lp_fee` (sells). Token continuity is 99.5% and SOL
-  continuity ~90% per pool. The gaps are probably liquidity events or variant
-  event layouts not yet decoded. PumpSwap state is used only to price exits
-  of positions that graduate mid-hold, a small share of trades.
+  continuity ~90% per pool. The breaks are concentrated in `BuyEvent` layout
+  variants (event lengths 500/508/515 bytes, ~10% of buys, probably the
+  exact-quote-in instruction family): base-reserve accounting is exact for
+  them, but the quote-reserve change follows neither the standard field
+  semantics nor constant product. Because every PumpSwap event reports its
+  own pre-trade reserves, the error never accumulates; it lasts only until
+  the next event on that pool. PumpSwap state is used only to price exits of
+  positions that graduate mid-hold, a small share of trades (counted as
+  `exits_on_amm` in every report).
 * **Mayhem mode.** Tokens launched with `is_mayhem_mode` are traded by
   pump.fun's Mayhem agent (program `MAyhSm...`) with zero-fee trades whose
   reserve updates are *not* constant-product consistent. They are flagged at
   launch and excluded from the tradable universe. A few unflagged tokens also
   receive zero-fee trades; such a token stops being tradable from the slot of
   its first zero-fee trade (point-in-time rule, `MintInfo::tradable_at`).
+
+* **Non-SOL quote curves.** About 6% of curve trades belong to tokens whose
+  curve is quoted in another asset: their TradeEvents report zero SOL amounts
+  and reserves. They are identified at launch (CreateEvent virtual SOL differs
+  from the standard 30 SOL) and excluded, since SOL-denominated execution
+  cannot be simulated on them.
 
 ## Failed transactions
 

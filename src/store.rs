@@ -157,6 +157,25 @@ pub struct Tape {
 }
 
 impl Tape {
+    /// Append one decoded event (live path). Events must arrive in chain order.
+    pub fn push_event(&mut self, e: &Event) {
+        self.slot.push(e.slot);
+        self.block_time.push(e.block_time);
+        self.tx_idx.push(e.tx_idx);
+        self.kind.push(e.kind);
+        self.mint.push(self.mints.id(&e.mint));
+        self.user.push(self.users.id(&e.user));
+        self.pool.push(self.pools.id(&e.pool));
+        self.is_buy.push(e.is_buy);
+        self.sol_amount.push(e.sol_amount);
+        self.token_amount.push(e.token_amount);
+        self.vsol.push(e.vsol);
+        self.vtok.push(e.vtok);
+        self.rsol.push(e.rsol);
+        self.fee_bps.push(e.fee_bps);
+        self.priority_fee.push(e.priority_fee);
+    }
+
     /// The first `n` events as an independent tape (interners cloned whole, so
     /// ids are identical). Used by the lookahead test.
     pub fn prefix(&self, n: usize) -> Tape {

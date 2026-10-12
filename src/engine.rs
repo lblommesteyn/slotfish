@@ -84,7 +84,7 @@ impl<'a> Replay<'a> {
         let mut quotes: Vec<Pool> = Vec::new();
         let mut queue: BinaryHeap<Reverse<(u64, Order)>> = BinaryHeap::new();
         let mut fe = if strat.needs_features() {
-            Some(FeatureEngine::new(t, tl, cfg.skill_horizon))
+            Some(FeatureEngine::new(cfg.skill_horizon))
         } else {
             None
         };
@@ -192,13 +192,7 @@ impl<'a> Replay<'a> {
             );
             let m = t.mint[i] as usize;
             let kind = t.kind[i];
-            let is_state = match kind {
-                Kind::Trade => true,
-                Kind::AmmBuy | Kind::AmmSell => {
-                    tl.info[m].pool.as_deref() == Some(t.pools.names[t.pool[i] as usize].as_str())
-                }
-                _ => false,
-            };
+            let is_state = tl.is_state_event(t, i);
             if is_state {
                 live[m] = Some((
                     Pool {
@@ -210,7 +204,7 @@ impl<'a> Replay<'a> {
                 ));
             }
             if let Some(f) = fe.as_mut() {
-                f.update(i);
+                f.update(t, tl, i);
             }
             let decide = kind == Kind::Trade
                 && slot >= cfg.decide_from
@@ -221,7 +215,7 @@ impl<'a> Replay<'a> {
             if decide {
                 decisions += 1;
                 if let Some(f) = fe.as_ref() {
-                    f.features(i, &mut feats);
+                    f.features(t, tl, i, &mut feats);
                 }
                 let pool = live[m].unwrap().0;
                 let ctx = Ctx {

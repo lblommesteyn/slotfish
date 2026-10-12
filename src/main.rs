@@ -69,7 +69,7 @@ struct StratArgs {
     /// Parquet with (slot u64, mint utf8, score f64) for --strategy signal.
     #[arg(long)]
     signal: Option<PathBuf>,
-    #[arg(long, default_value_t = 0.0)]
+    #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
     threshold: f64,
     #[arg(long, default_value = "model")]
     label: String,
@@ -191,6 +191,35 @@ enum Cmd {
         exec: ExecArgs,
         #[arg(long, default_value = "data/dataset.parquet")]
         out: PathBuf,
+    },
+    /// Check the Rust scorer reproduces Python's predictions for an exported model.
+    VerifyModel { model: PathBuf },
+    /// Live paper trading: tail finalized blocks, score decisions, record hypothetical trades.
+    Paper {
+        #[arg(long, default_value = "https://solana-rpc.publicnode.com")]
+        url: String,
+        #[arg(long)]
+        model: PathBuf,
+        #[arg(long, allow_negative_numbers = true)]
+        threshold: f64,
+        #[arg(long, default_value_t = 120.0)]
+        hold_secs: f64,
+        #[command(flatten)]
+        exec: ExecArgs,
+        /// Slots to submit and land after a decision, on top of measured data lag.
+        #[arg(long, default_value_t = 1)]
+        submit_slots: u64,
+        #[arg(long, default_value_t = 4)]
+        workers: usize,
+        #[arg(long, default_value = "data/paper")]
+        out: PathBuf,
+        /// Replay this historical store first so wallet skill starts warm.
+        #[arg(long)]
+        warm: Option<PathBuf>,
+        #[arg(long, default_value_t = 3600.0)]
+        duration_secs: f64,
+        #[arg(long, default_value_t = 0.217)]
+        slot_secs: f64,
     },
     /// Measure replay throughput, per-event latency and memory.
     Bench {
@@ -422,6 +451,43 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Cmd::VerifyModel { model } => {
+            let sc = slotfish::model::Scorer::load(&model)?;
+            let (n, worst) = sc.verify(&model.with_extension("verify.json"))?;
+            println!(
+                "{}",
+                serde_json::json!({"model": model, "rows": n, "max_abs_diff": worst})
+            );
+            if worst > 1e-9 {
+                bail!("scorer disagrees with Python by {worst}");
+            }
+            Ok(())
+        }
+        Cmd::Paper {
+            url,
+            model,
+            threshold,
+            hold_secs,
+            exec,
+            submit_slots,
+            workers,
+            out,
+            warm,
+            duration_secs,
+            slot_secs,
+        } => slotfish::paper::run(&slotfish::paper::PaperConfig {
+            url,
+            model,
+            threshold,
+            hold_secs,
+            exec: exec.cfg(),
+            submit_slots,
+            workers,
+            out_dir: out,
+            warm,
+            duration_secs,
+            slot_secs,
+        }),
         Cmd::Bench { events, repeats } => {
             let t0 = Instant::now();
             let tape = read_tape(&events)?;

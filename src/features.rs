@@ -1,7 +1,7 @@
 //! Streaming, point-in-time feature engine.
 //!
-//! `FeatureEngine::update(i)` must be called for every event in tape order.
-//! `FeatureEngine::features(i)` may only be called right after `update(i)` and
+//! `FeatureEngine::update(t, tl, i)` must be called for every event in tape order.
+//! `FeatureEngine::features(t, tl, i)` may only be called right after `update` and
 //! uses nothing but events 0..=i plus *past* timeline states, so every feature
 //! is available at the decision instant by construction.
 //!
@@ -88,9 +88,7 @@ impl Skill {
     }
 }
 
-pub struct FeatureEngine<'a> {
-    t: &'a Tape,
-    tl: &'a Timeline,
+pub struct FeatureEngine {
     mints: Vec<MintState>,
     skill: HashMap<u32, Skill>,
     /// (resolve_slot, mint, user, entry_price) pending skill outcomes.
@@ -102,14 +100,10 @@ pub struct FeatureEngine<'a> {
 
 const TOTAL_SUPPLY: f64 = 1e15; // 1B tokens, 6 decimals
 
-impl<'a> FeatureEngine<'a> {
-    pub fn new(t: &'a Tape, tl: &'a Timeline, skill_horizon: u64) -> Self {
+impl FeatureEngine {
+    pub fn new(skill_horizon: u64) -> Self {
         FeatureEngine {
-            t,
-            tl,
-            mints: (0..t.mints.names.len())
-                .map(|_| MintState::default())
-                .collect(),
+            mints: Vec::new(),
             skill: HashMap::new(),
             pending: BinaryHeap::new(),
             skill_horizon,
@@ -122,14 +116,14 @@ impl<'a> FeatureEngine<'a> {
         p.to_bits()
     }
 
-    fn resolve_until(&mut self, slot: u64) {
+    fn resolve_until(&mut self, tl: &Timeline, slot: u64) {
         while let Some(Reverse((rs, mint, user, pbits))) = self.pending.peek().copied() {
             if rs > slot {
                 break;
             }
             self.pending.pop();
             let entry = f64::from_bits(pbits);
-            let win = match self.tl.state_at_end_of(mint, rs) {
+            let win = match tl.state_at_end_of(mint, rs) {
                 Some((p, _)) => p.price() > entry * (1.0 + SKILL_HURDLE),
                 None => false,
             };
@@ -146,17 +140,19 @@ impl<'a> FeatureEngine<'a> {
         (s.mean(), s.n)
     }
 
-    /// Ingest event i (must be called in tape order).
-    pub fn update(&mut self, i: usize) {
-        let t = self.t;
+    /// Ingest event i (must be called in tape order, after `tl` has seen it).
+    pub fn update(&mut self, t: &Tape, tl: &Timeline, i: usize) {
         let slot = t.slot[i];
         // Outcomes resolving strictly before this slot are known now. Using `slot - 1`
         // keeps same-slot information out: the end-of-slot state is not yet final.
-        self.resolve_until(slot.saturating_sub(1));
+        self.resolve_until(tl, slot.saturating_sub(1));
         let m = t.mint[i] as usize;
+        if self.mints.len() <= m {
+            self.mints.resize_with(m + 1, MintState::default);
+        }
         match t.kind[i] {
             Kind::Trade => {
-                let info = &self.tl.info[m];
+                let info = &tl.info[m];
                 let ms = &mut self.mints[m];
                 ms.n_trades += 1;
                 ms.peak_sol = ms.peak_sol.max(t.vsol[i]);
@@ -206,15 +202,14 @@ impl<'a> FeatureEngine<'a> {
     }
 
     /// Feature vector for the state right after event i (a curve Trade).
-    pub fn features(&self, i: usize, out: &mut Vec<f32>) {
-        let t = self.t;
+    pub fn features(&self, t: &Tape, tl: &Timeline, i: usize, out: &mut Vec<f32>) {
         let slot = t.slot[i];
         let m = t.mint[i];
         let ms = &self.mints[m as usize];
-        let info = &self.tl.info[m as usize];
+        let info = &tl.info[m as usize];
         let price = t.vsol[i] as f64 / t.vtok[i].max(1) as f64;
         let past_ret = |w: u64| -> f64 {
-            match self.tl.state_at_end_of(m, slot.saturating_sub(w + 1)) {
+            match tl.state_at_end_of(m, slot.saturating_sub(w + 1)) {
                 Some((p, _)) => (price / p.price()).ln(),
                 None => 0.0,
             }

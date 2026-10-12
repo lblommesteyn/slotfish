@@ -109,10 +109,12 @@ def fit_ridge(x, y):
     m = Ridge(alpha=10.0).fit((xf - mu) / sd, np.clip(y, *LABEL_CLIP))
 
     def predict(xn):
-        xn = np.where(np.isnan(xn), med, xn)
+        xn = np.where(np.isnan(xn), med, xn).astype(np.float64)
         return m.predict((xn - mu) / sd)
 
-    return predict, dict(zip(range(x.shape[1]), m.coef_.tolist()))
+    params = {"kind": "ridge", "median": med.tolist(), "mu": mu.tolist(), "sd": sd.tolist(),
+              "coef": m.coef_.tolist(), "intercept": float(m.intercept_)}
+    return predict, params
 
 
 def fit_lgbm(x, y, xv, yv):
@@ -126,6 +128,15 @@ def fit_lgbm(x, y, xv, yv):
     m = lgb.train(params, dt, num_boost_round=2000, valid_sets=[dv],
                   callbacks=[lgb.early_stopping(100, verbose=False)])
     return (lambda xn: m.predict(xn, num_iteration=m.best_iteration)), m
+
+
+def export_model(path: Path, payload: dict, feats: list[str], predict, x_sample: np.ndarray) -> None:
+    """Write a model the Rust scorer can load, plus Python predictions to verify it against."""
+    payload = {**payload, "features": feats}
+    path.write_text(json.dumps(payload))
+    rows = [[None if np.isnan(v) else float(v) for v in r] for r in x_sample]
+    verify = {"features": rows, "pred": [float(p) for p in predict(x_sample)]}
+    path.with_suffix(".verify.json").write_text(json.dumps(verify))
 
 
 def hour_block_bootstrap(values: np.ndarray, hours: np.ndarray, n=2000, seed=SEED) -> tuple[float, float]:
@@ -223,10 +234,10 @@ def write_signal(path: Path, d: pl.DataFrame, score: np.ndarray) -> None:
     pq.write_table(tbl, path)
 
 
-def run(dataset: Path, out_dir: Path) -> dict:
+def run(dataset: Path, out_dir: Path, purge_secs: float = 630.0) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     df = load(dataset)
-    sp = split(df)
+    sp = split(df, purge_secs=purge_secs)
     res: dict = {"rows": df.height, "slot_secs": slot_secs(df), "bounds": sp.bounds,
                  "split_rows": {"train": sp.train.height, "val": sp.val.height, "test": sp.test.height},
                  "horizons": {}}
@@ -237,10 +248,19 @@ def run(dataset: Path, out_dir: Path) -> dict:
         # Test rows: keep all decision rows (signal file needs every decision point);
         # evaluation uses rows with a label.
         xt, yt, dt = xy(sp.test, ALL, h)
+        if min(len(y), len(yv), len(yt)) < 200:
+            res["horizons"][h] = {"skipped": "insufficient labelled rows",
+                                  "n": [int(len(y)), int(len(yv)), int(len(yt))]}
+            print(f"[{h}] skipped: labelled rows train/val/test = {len(y)}/{len(yv)}/{len(yt)}", flush=True)
+            continue
         hr["label_stats_train"] = {"n": int(len(y)), "mean": float(y.mean()), "median": float(np.median(y)),
                                    "p_pos": float((y > 0).mean())}
-        ridge, coefs = fit_ridge(x, y)
+        ridge, ridge_params = fit_ridge(x, y)
         lg, model = fit_lgbm(x, y, xv, yv)
+        sample = xt[:: max(1, len(xt) // 500)][:500]
+        export_model(out_dir / f"model_ridge_{h}.json", ridge_params, ALL, ridge, sample)
+        export_model(out_dir / f"model_lgbm_{h}.json",
+                     {"kind": "lgbm", "dump": model.dump_model(num_iteration=model.best_iteration)}, ALL, lg, sample)
         for name, f in (("ridge", ridge), ("lgbm", lg)):
             pv, pt = f(xv), f(xt)
             thr = choose_threshold(pv, yv)
@@ -256,7 +276,7 @@ def run(dataset: Path, out_dir: Path) -> dict:
             test_all = sp.test
             xa = test_all.select(ALL).to_numpy().astype(np.float32)
             write_signal(out_dir / f"signal_{name}_{h}.parquet", test_all, f(xa))
-        hr["ridge_coefs"] = {ALL[k]: v for k, v in coefs.items()}
+        hr["ridge_coefs"] = dict(zip(ALL, ridge_params["coef"]))
         imp = model.feature_importance("gain")
         hr["lgbm_gain"] = dict(sorted(zip(ALL, (imp / imp.sum()).round(4).tolist()), key=lambda kv: -kv[1]))
         # Ablations (LightGBM): which feature groups carry the test IC?

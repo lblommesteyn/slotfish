@@ -40,7 +40,7 @@ pub fn build(
     let mut cfg = cfg.clone();
     cfg.p_fail = 0.0;
     let data_end = *t.slot.last().unwrap_or(&0);
-    let mut fe = FeatureEngine::new(t, tl, horizon_slots(120.0, slot_secs));
+    let mut fe = FeatureEngine::new(horizon_slots(120.0, slot_secs));
     let hslots: Vec<u64> = HORIZONS
         .iter()
         .map(|(s, _)| horizon_slots(*s, slot_secs))
@@ -109,7 +109,7 @@ pub fn build(
     };
 
     for i in 0..t.len() {
-        fe.update(i);
+        fe.update(t, tl, i);
         let m = t.mint[i];
         let slot = t.slot[i];
         let info = &tl.info[m as usize];
@@ -119,7 +119,7 @@ pub fn build(
         if i + 1 < t.len() && t.slot[i + 1] == slot && next_same_mint_in_slot(t, i) {
             continue;
         }
-        fe.features(i, &mut feats);
+        fe.features(t, tl, i, &mut feats);
         slot_b.append_value(slot);
         bt_b.append_value(t.block_time[i]);
         mint_b.append_value(&t.mints.names[m as usize]);

@@ -8,6 +8,8 @@ pub mod exec;
 pub mod features;
 pub mod fetch;
 pub mod market;
+pub mod model;
+pub mod paper;
 pub mod report;
 pub mod store;
 pub mod strategy;
